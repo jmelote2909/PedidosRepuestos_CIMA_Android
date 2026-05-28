@@ -88,18 +88,35 @@ function invalidateCache(...keys) {
 }
 
 async function sendOrderEmail(targetEmail, order) {
-  const smtpPass = await db.get('SELECT value FROM config WHERE key = $1', ['smtp_pass']);
-  const senderEmailRow = await db.get("SELECT value FROM config WHERE key = 'target_email'");
+  if (!targetEmail) return;
 
-  if (!targetEmail || !smtpPass || !senderEmailRow) return;
+  // Buscar en destination_emails para ver si tiene su contraseña configurada
+  const mailAccount = await db.get('SELECT * FROM destination_emails WHERE email = $1', [targetEmail]);
 
-  const senderEmail = senderEmailRow.value;
+  let senderEmail = targetEmail;
+  let smtpPassVal = '';
+
+  if (mailAccount && mailAccount.password) {
+    senderEmail = mailAccount.email;
+    smtpPassVal = mailAccount.password;
+  } else {
+    // Fallback a config global si no se encuentra la cuenta (compatibilidad)
+    const oldEmail = await db.get("SELECT value FROM config WHERE key = 'target_email'");
+    const oldPass = await db.get("SELECT value FROM config WHERE key = 'smtp_pass'");
+    senderEmail = oldEmail ? oldEmail.value : targetEmail;
+    smtpPassVal = oldPass ? oldPass.value : '';
+  }
+
+  if (!smtpPassVal) {
+    console.error('No se pudo enviar el correo: no hay contraseña configurada para', targetEmail);
+    return;
+  }
 
   const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
       user: senderEmail,
-      pass: smtpPass.value
+      pass: smtpPassVal
     }
   });
 
@@ -413,29 +430,29 @@ app.post('/api/config', async (req, res, next) => {
 
 app.post('/api/config/test_email', async (req, res) => {
   try {
-    const sender = await db.get("SELECT value FROM config WHERE key = 'target_email'");
-    const smtpPass = await db.get("SELECT value FROM config WHERE key = 'smtp_pass'");
-    const { to } = req.body; // Allow specifying a test recipient
-    
-    if (!sender || !smtpPass) {
-      throw new Error('Configuración incompleta del remitente');
+    const { email } = req.body;
+    if (!email) {
+      throw new Error('Debe especificar el correo a probar');
     }
 
-    const testTarget = to || sender.value;
+    const mailAccount = await db.get('SELECT * FROM destination_emails WHERE email = $1', [email]);
+    if (!mailAccount || !mailAccount.password) {
+      throw new Error('Cuenta de correo no encontrada o no tiene contraseña configurada');
+    }
 
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
-        user: sender.value,
-        pass: smtpPass.value
+        user: mailAccount.email,
+        pass: mailAccount.password
       }
     });
 
     await transporter.sendMail({
-      from: `"CIMA - Pedido de Repuestos" <${sender.value}>`,
-      to: testTarget,
+      from: `"CIMA - Prueba" <${mailAccount.email}>`,
+      to: mailAccount.email,
       subject: 'Prueba de Conexión - CIMA - Pedido de Repuestos',
-      text: 'Si recibes esto, la configuración de envío de tu App es correcta.'
+      text: 'Si recibes esto, la configuración de tu cuenta de correo en la App es correcta.'
     });
     res.json({ success: true });
   } catch (error) {
@@ -448,20 +465,33 @@ app.post('/api/config/test_email', async (req, res) => {
 app.get('/api/destination_emails', async (req, res) => {
   const cached = getCache('destination_emails');
   if (cached) return res.json(cached);
-  const emails = await db.all('SELECT * FROM destination_emails');
+  const emails = await db.all('SELECT * FROM destination_emails ORDER BY id ASC');
   setCache('destination_emails', emails);
   res.json(emails);
 });
 
 app.post('/api/destination_emails', async (req, res) => {
-  const { email, name } = req.body;
+  const { email, name, password } = req.body;
   try {
-    await db.run('INSERT INTO destination_emails (email, name) VALUES ($1, $2)', [email, name || '']);
+    await db.run('INSERT INTO destination_emails (email, name, password) VALUES ($1, $2, $3)', [email, name || '', password || '']);
     invalidateCache('destination_emails');
     res.json({ success: true });
   } catch (e) {
     console.error('Error creating destination email:', e);
     res.status(400).json({ success: false, message: 'El correo ya existe o ocurrió un error' });
+  }
+});
+
+app.put('/api/destination_emails/:id', async (req, res) => {
+  const { email, name, password } = req.body;
+  const { id } = req.params;
+  try {
+    await db.run('UPDATE destination_emails SET email = $1, name = $2, password = $3 WHERE id = $4', [email, name || '', password || '', id]);
+    invalidateCache('destination_emails');
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Error updating destination email:', e);
+    res.status(400).json({ success: false, message: 'Error al actualizar la cuenta de correo' });
   }
 });
 
@@ -471,7 +501,7 @@ app.delete('/api/destination_emails/:id', async (req, res) => {
     invalidateCache('destination_emails');
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ success: false, message: 'Error al borrar' });
+    res.status(500).json({ success: false, message: 'Error al borrar la cuenta de correo' });
   }
 });
 
@@ -626,9 +656,37 @@ const PORT = process.env.PORT || 3000;
       CREATE TABLE IF NOT EXISTS destination_emails (
         id SERIAL PRIMARY KEY,
         email VARCHAR(255) UNIQUE,
-        name VARCHAR(255)
+        name VARCHAR(255),
+        password TEXT DEFAULT ''
       );
     `);
+
+    // Asegurar columna password en destination_emails
+    try {
+      await pool.query(`ALTER TABLE destination_emails ADD COLUMN IF NOT EXISTS password TEXT DEFAULT '';`);
+      console.log('Column "password" ensured in destination_emails table');
+    } catch (passErr) {
+      console.warn('Could not ensure "password" column:', passErr.message);
+    }
+
+    // Migrar datos antiguos de configuración global si la tabla está vacía
+    try {
+      const emailCount = await db.get('SELECT COUNT(*) as count FROM destination_emails');
+      if (parseInt(emailCount?.count || 0) === 0) {
+        const oldEmail = await db.get("SELECT value FROM config WHERE key = 'target_email'");
+        const oldPass = await db.get("SELECT value FROM config WHERE key = 'smtp_pass'");
+        if (oldEmail && oldEmail.value && oldEmail.value !== 'tu-email@gmail.com') {
+          console.log('Migrating old global config to destination_emails...');
+          await db.run('INSERT INTO destination_emails (email, name, password) VALUES ($1, $2, $3)', [
+            oldEmail.value,
+            'Almacén Principal',
+            oldPass ? oldPass.value : ''
+          ]);
+        }
+      }
+    } catch (migErr) {
+      console.warn('Auto-migration of old configs failed:', migErr.message);
+    }
 
     // Intentar asegurar el ON DELETE CASCADE por si la tabla ya existía sin él
     try {
@@ -650,7 +708,6 @@ const PORT = process.env.PORT || 3000;
       console.warn('Could not ensure "description" column:', descErr.message);
     }
 
-    // Initial Data
     const adminUserExists = await db.get('SELECT * FROM users WHERE username = $1', ['admin']);
     if (!adminUserExists) {
       const hashedPass = await bcrypt.hash('1234', 10);

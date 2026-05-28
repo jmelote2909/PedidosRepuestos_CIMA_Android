@@ -34,6 +34,8 @@ export default function AdminScreen() {
   const [destinationEmails, setDestinationEmails] = useState([]);
   const [newDestEmail, setNewDestEmail] = useState('');
   const [newDestName, setNewDestName] = useState('');
+  const [newDestPassword, setNewDestPassword] = useState('');
+  const [editingDestId, setEditingDestId] = useState(null);
 
   useEffect(() => {
     checkAdminAccess();
@@ -84,15 +86,23 @@ export default function AdminScreen() {
 
 
   const handleTestEmail = async () => {
+    if (!newDestEmail) {
+      alert('Introduce el correo electrónico que deseas probar');
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/config/test_email`, {
         method: 'POST',
-        headers: getHeaders(),
+        headers: { 
+          'Content-Type': 'application/json',
+          'bypass-tunnel-reminder': 'true'
+        },
+        body: JSON.stringify({ email: newDestEmail })
       });
       const data = await res.json();
       if (data.success) {
-        alert('Email de prueba enviado con éxito a ' + targetEmail);
+        alert('Email de prueba enviado con éxito a ' + newDestEmail);
       } else {
         throw new Error(data.message);
       }
@@ -103,29 +113,42 @@ export default function AdminScreen() {
     }
   };
 
-  const handleSaveConfig = async () => {
+  const handleSaveDestinationEmail = async () => {
+    if (!newDestEmail || !newDestPassword) {
+      alert('Por favor, introduce el correo electrónico y su contraseña de aplicación');
+      return;
+    }
     try {
-      await Promise.all([
-        fetch(`${API_URL}/config`, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'bypass-tunnel-reminder': 'true'
-          },
-          body: JSON.stringify({ key: 'smtp_pass', value: smtpPassword })
-        }),
-        fetch(`${API_URL}/config`, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'bypass-tunnel-reminder': 'true'
-          },
-          body: JSON.stringify({ key: 'target_email', value: targetEmail })
-        })
-      ]);
-      alert('Configuración guardada correctamente');
+      const url = editingDestId ? `${API_URL}/destination_emails/${editingDestId}` : `${API_URL}/destination_emails`;
+      const method = editingDestId ? 'PUT' : 'POST';
+      
+      const res = await fetch(url, {
+        method,
+        headers: { 
+          'Content-Type': 'application/json',
+          'bypass-tunnel-reminder': 'true'
+        },
+        body: JSON.stringify({ name: newDestName, email: newDestEmail, password: newDestPassword })
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message);
+      
+      alert(editingDestId ? 'Cuenta de correo actualizada correctamente' : 'Cuenta de correo guardada correctamente');
+      setNewDestEmail('');
+      setNewDestName('');
+      setNewDestPassword('');
+      setEditingDestId(null);
       fetchData();
-    } catch (e) { alert('Error al guardar'); }
+    } catch (e) { 
+      alert(e.message); 
+    }
+  };
+
+  const handleEditDestinationEmail = (dest) => {
+    setNewDestName(dest.name || '');
+    setNewDestEmail(dest.email || '');
+    setNewDestPassword(dest.password || '');
+    setEditingDestId(dest.id);
   };
 
   const handleUpdateAdminCredentials = async () => {
@@ -144,26 +167,6 @@ export default function AdminScreen() {
     } catch (e) { alert('Error al actualizar credenciales'); }
   };
 
-  const handleAddDestinationEmail = async () => {
-    if (newDestEmail) {
-      try {
-        const res = await fetch(`${API_URL}/destination_emails`, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'bypass-tunnel-reminder': 'true'
-          },
-          body: JSON.stringify({ email: newDestEmail, name: newDestName })
-        });
-        const data = await res.json();
-        if (!data.success) throw new Error(data.message);
-        setNewDestEmail('');
-        setNewDestName('');
-        fetchData();
-      } catch (e) { alert(e.message); }
-    }
-  };
-
   const handleDeleteDestinationEmail = async (id) => {
     const performDelete = async () => {
       try {
@@ -173,6 +176,12 @@ export default function AdminScreen() {
         });
         const data = await res.json();
         if (data.success) {
+          if (editingDestId === id) {
+            setNewDestEmail('');
+            setNewDestName('');
+            setNewDestPassword('');
+            setEditingDestId(null);
+          }
           fetchData();
         } else {
           alert(`Error: ${data.message}`);
@@ -183,11 +192,11 @@ export default function AdminScreen() {
     };
 
     if (Platform.OS === 'web') {
-      if (window.confirm("¿Seguro que quieres eliminar este correo de destino?")) {
+      if (window.confirm("¿Seguro que quieres eliminar esta cuenta de correo?")) {
         performDelete();
       }
     } else {
-      Alert.alert("Eliminar", "¿Seguro que quieres eliminar este correo de destino?", [
+      Alert.alert("Eliminar", "¿Seguro que quieres eliminar esta cuenta de correo?", [
         { text: "No" },
         { text: "Sí", onPress: performDelete }
       ]);
@@ -438,62 +447,27 @@ export default function AdminScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        
-        {/* Email Settings Section */}
+        {/* Unified Email Accounts Section */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
-            <MaterialCommunityIcons name="email-edit-outline" size={24} color="#10B981" />
-            <Text style={styles.cardTitle}>Configuración del Remitente</Text>
+            <MaterialCommunityIcons name="email-multiple-outline" size={24} color="#10B981" />
+            <Text style={styles.cardTitle}>
+              {editingDestId ? 'Editar Cuenta de Correo' : 'Gestión de Cuentas de Correo'}
+            </Text>
           </View>
           
+          <Text style={styles.description}>
+            Configura las cuentas de correo desde las que se enviarán y recibirán los pedidos. Cada cuenta enviará un correo de notificación a sí misma al seleccionarse.
+          </Text>
+
           <View style={styles.manualContainer}>
             <Text style={styles.manualTitle}>Manual de configuración:</Text>
-            <Text style={styles.manualText}>1.- Entra en "Gestionar tu cuenta de Google"</Text>
-            <Text style={styles.manualText}>2.- En el buscador busca "Contraseñas de aplicación"</Text>
+            <Text style={styles.manualText}>1.- Entra en "Gestionar tu cuenta de Google".</Text>
+            <Text style={styles.manualText}>2.- En el buscador busca "Contraseñas de aplicación".</Text>
             <Text style={styles.manualText}>3.- Crea una nueva específica para esta App.</Text>
-            <Text style={styles.manualText}>4.- Pega la contraseña de 16 letras (sin espacios) y tu Gmail abajo.</Text>
+            <Text style={styles.manualText}>4.- Pega la contraseña de 16 letras (sin espacios) en el campo Contraseña.</Text>
           </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>Gmail Remitente:</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="tu-correo@gmail.com"
-              value={targetEmail}
-              onChangeText={setTargetEmail}
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>Contraseña de Aplicación:</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="xxxx xxxx xxxx xxxx"
-              value={smtpPassword}
-              onChangeText={setSmtpPassword}
-              secureTextEntry
-            />
-          </View>
-          
-          <View style={{ flexDirection: 'row', gap: 10 }}>
-            <TouchableOpacity style={[styles.button, { backgroundColor: '#10B981', flex: 1 }]} onPress={handleSaveConfig}>
-              <Text style={styles.buttonText}>Guardar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.button, { backgroundColor: '#3B82F6', flex: 1 }]} onPress={handleTestEmail}>
-              <Text style={styles.buttonText}>Probar Email</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Destination Emails Section */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <MaterialCommunityIcons name="email-multiple" size={24} color="#F43F5E" />
-            <Text style={styles.cardTitle}>Gestión de Destinatarios</Text>
-          </View>
-          <Text style={styles.description}>
-            Añade los correos electrónicos que recibirán los pedidos.
-          </Text>
           <View style={styles.inputContainer}>
             <TextInput
               style={styles.input}
@@ -502,38 +476,82 @@ export default function AdminScreen() {
               onChangeText={setNewDestName}
             />
           </View>
+
           <View style={styles.inputContainer}>
             <TextInput
               style={styles.input}
-              placeholder="Correo electrónico"
+              placeholder="Correo Gmail (ej: tu-cuenta@gmail.com)"
               value={newDestEmail}
               onChangeText={setNewDestEmail}
               keyboardType="email-address"
               autoCapitalize="none"
             />
           </View>
+
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={styles.input}
+              placeholder="Contraseña de Aplicación (16 letras)"
+              value={newDestPassword}
+              onChangeText={setNewDestPassword}
+              secureTextEntry
+            />
+          </View>
           
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <TouchableOpacity style={[styles.button, { backgroundColor: '#F43F5E', flex: 1 }]} onPress={handleAddDestinationEmail}>
-              <Text style={styles.buttonText}>Añadir Destinatario</Text>
+            <TouchableOpacity 
+              style={[styles.button, { backgroundColor: '#10B981', flex: 2 }]} 
+              onPress={handleSaveDestinationEmail}
+            >
+              <Text style={styles.buttonText}>
+                {editingDestId ? 'Actualizar Cuenta' : 'Guardar Cuenta'}
+              </Text>
             </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.button, { backgroundColor: '#3B82F6', flex: 1.5 }]} 
+              onPress={handleTestEmail}
+            >
+              <Text style={styles.buttonText}>Probar Email</Text>
+            </TouchableOpacity>
+
+            {editingDestId && (
+              <TouchableOpacity 
+                style={[styles.button, { backgroundColor: '#6B7280', paddingHorizontal: 15 }]} 
+                onPress={() => {
+                  setNewDestEmail('');
+                  setNewDestName('');
+                  setNewDestPassword('');
+                  setEditingDestId(null);
+                }}
+              >
+                <Text style={styles.buttonText}>X</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
-          <View style={{ marginTop: 20, borderTopWidth: 1, borderTopColor: '#F3F4F6', paddingTop: 15 }}>
-            <Text style={{ fontWeight: 'bold', marginBottom: 10, color: '#4B5563' }}>Destinatarios Existentes:</Text>
-            {destinationEmails.map((dest) => (
-              <View key={dest.id} style={styles.itemRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.itemName}>{dest.name || 'Sin nombre'}</Text>
-                  <Text style={styles.itemCategory}>{dest.email}</Text>
+          <View style={{ marginTop: 25, borderTopWidth: 1, borderTopColor: '#F3F4F6', paddingTop: 15 }}>
+            <Text style={{ fontWeight: 'bold', marginBottom: 10, color: '#4B5563' }}>Cuentas de Correo Configuradas:</Text>
+            {destinationEmails.length === 0 ? (
+              <Text style={{ color: '#9CA3AF', fontStyle: 'italic', marginVertical: 10 }}>No hay cuentas configuradas aún.</Text>
+            ) : (
+              destinationEmails.map((dest) => (
+                <View key={dest.id} style={styles.itemRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.itemName}>{dest.name || 'Sin nombre'}</Text>
+                    <Text style={styles.itemCategory}>{dest.email}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity onPress={() => handleEditDestinationEmail(dest)} style={styles.actionBtn}>
+                      <MaterialCommunityIcons name="pencil" size={18} color="#10B981" />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleDeleteDestinationEmail(dest.id)} style={styles.actionBtn}>
+                      <MaterialCommunityIcons name="trash-can" size={18} color="#EF4444" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
-                <View style={{ flexDirection: 'row', gap: 5 }}>
-                  <TouchableOpacity onPress={() => handleDeleteDestinationEmail(dest.id)} style={styles.actionBtn}>
-                    <MaterialCommunityIcons name="trash-can" size={18} color="#EF4444" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
+              ))
+            )}
           </View>
         </View>
 
