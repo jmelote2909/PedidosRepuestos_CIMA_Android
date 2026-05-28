@@ -17,6 +17,9 @@ export default function ShopScreen() {
   const [isCartVisible, setCartVisible] = useState(false);
   const [currentUser, setCurrentUser] = useState('');
   const [description, setDescription] = useState('');
+  const [destinationEmails, setDestinationEmails] = useState([]);
+  const [selectedDestination, setSelectedDestination] = useState(null);
+  const [isDestPickerVisible, setDestPickerVisible] = useState(false);
 
   useEffect(() => {
     loadUser();
@@ -38,6 +41,7 @@ export default function ShopScreen() {
       if (data.success) {
         setProducts(data.products);
         setCategories(['Todos', ...data.categories.map(c => c.name)]);
+        setDestinationEmails(data.destination_emails || []);
       }
     } catch (e) {
       alert('Error cargando datos');
@@ -59,6 +63,11 @@ export default function ShopScreen() {
   };
 
   const handleCheckout = async () => {
+    if (destinationEmails.length > 0 && !selectedDestination) {
+      alert('Por favor selecciona un destinatario.');
+      return;
+    }
+
     try {
       await fetch(`${API_URL}/orders`, {
         method: 'POST',
@@ -68,12 +77,14 @@ export default function ShopScreen() {
           items: cart,
           status: 'Pendiente',
           date: new Date().toLocaleString(),
-          description: description
+          description: description,
+          target_email: selectedDestination ? selectedDestination.email : null
         })
       });
       alert('¡Pedido realizado con éxito!');
       setCart([]);
       setDescription('');
+      setSelectedDestination(null);
       setCartVisible(false);
     } catch (e) {
       alert('Error al realizar el pedido');
@@ -203,6 +214,22 @@ export default function ShopScreen() {
               }
             />
 
+            {destinationEmails.length > 0 && (
+              <View style={styles.descriptionSection}>
+                <Text style={styles.descriptionLabel}>Seleccionar Destinatario:</Text>
+                <TouchableOpacity 
+                  style={styles.destPickerButton} 
+                  onPress={() => setDestPickerVisible(true)}
+                >
+                  <MaterialCommunityIcons name="email-outline" size={20} color="#6B7280" />
+                  <Text style={styles.destPickerText}>
+                    {selectedDestination ? `${selectedDestination.name} (${selectedDestination.email})` : 'Elige a quién enviar'}
+                  </Text>
+                  <MaterialCommunityIcons name="chevron-down" size={20} color="#6B7280" />
+                </TouchableOpacity>
+              </View>
+            )}
+
             <View style={styles.descriptionSection}>
               <Text style={styles.descriptionLabel}>Descripción / Notas (opcional):</Text>
               <TextInput
@@ -227,6 +254,48 @@ export default function ShopScreen() {
             </View>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Modal para el selector de destinatarios */}
+      <Modal
+        visible={isDestPickerVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setDestPickerVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.destPickerModal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Destinatarios</Text>
+              <TouchableOpacity onPress={() => setDestPickerVisible(false)}>
+                <MaterialCommunityIcons name="close" size={24} color="#1F2937" />
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={destinationEmails}
+              keyExtractor={(item) => item.id.toString()}
+              renderItem={({ item }) => (
+                <TouchableOpacity 
+                  style={styles.destPickerItem} 
+                  onPress={() => {
+                    setSelectedDestination(item);
+                    setDestPickerVisible(false);
+                  }}
+                >
+                  <Text style={[
+                    styles.destPickerItemText,
+                    selectedDestination?.id === item.id && { color: '#10B981', fontWeight: 'bold' }
+                  ]}>
+                    {item.name || 'Sin nombre'} ({item.email})
+                  </Text>
+                  {selectedDestination?.id === item.id && (
+                    <MaterialCommunityIcons name="check" size={20} color="#10B981" />
+                  )}
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -451,5 +520,46 @@ const styles = StyleSheet.create({
     height: 80,
     borderWidth: 1,
     borderColor: '#E5E7EB',
+  },
+  destPickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  destPickerText: {
+    flex: 1,
+    marginLeft: 10,
+    fontSize: 14,
+    color: '#1F2937',
+  },
+  destPickerModal: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    margin: 20,
+    maxHeight: '60%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 10,
+    marginTop: 'auto',
+    marginBottom: 'auto',
+  },
+  destPickerItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  destPickerItemText: {
+    fontSize: 16,
+    color: '#374151',
   }
 });

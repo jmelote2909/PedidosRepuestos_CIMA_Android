@@ -31,6 +31,10 @@ export default function AdminScreen() {
   const [productImage, setProductImage] = useState('');
   const [isPickerVisible, setPickerVisible] = useState(false);
 
+  const [destinationEmails, setDestinationEmails] = useState([]);
+  const [newDestEmail, setNewDestEmail] = useState('');
+  const [newDestName, setNewDestName] = useState('');
+
   useEffect(() => {
     checkAdminAccess();
     fetchData();
@@ -63,6 +67,7 @@ export default function AdminScreen() {
         setUsers(data.users);
         setCategories(data.categories);
         setProducts(data.products);
+        setDestinationEmails(data.destination_emails || []);
         
         // Mapear configuración
         const cfg = data.config;
@@ -137,6 +142,56 @@ export default function AdminScreen() {
         fetchData();
       }
     } catch (e) { alert('Error al actualizar credenciales'); }
+  };
+
+  const handleAddDestinationEmail = async () => {
+    if (newDestEmail) {
+      try {
+        const res = await fetch(`${API_URL}/destination_emails`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'bypass-tunnel-reminder': 'true'
+          },
+          body: JSON.stringify({ email: newDestEmail, name: newDestName })
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message);
+        setNewDestEmail('');
+        setNewDestName('');
+        fetchData();
+      } catch (e) { alert(e.message); }
+    }
+  };
+
+  const handleDeleteDestinationEmail = async (id) => {
+    const performDelete = async () => {
+      try {
+        const res = await fetch(`${API_URL}/destination_emails/${id}`, { 
+          method: 'DELETE',
+          headers: getHeaders(),
+        });
+        const data = await res.json();
+        if (data.success) {
+          fetchData();
+        } else {
+          alert(`Error: ${data.message}`);
+        }
+      } catch (err) {
+        alert(`Error de conexión: ${err.message}`);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm("¿Seguro que quieres eliminar este correo de destino?")) {
+        performDelete();
+      }
+    } else {
+      Alert.alert("Eliminar", "¿Seguro que quieres eliminar este correo de destino?", [
+        { text: "No" },
+        { text: "Sí", onPress: performDelete }
+      ]);
+    }
   };
 
   const handleAddUser = async () => {
@@ -388,7 +443,7 @@ export default function AdminScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <MaterialCommunityIcons name="email-edit-outline" size={24} color="#10B981" />
-            <Text style={styles.cardTitle}>Configuración de Correo</Text>
+            <Text style={styles.cardTitle}>Configuración del Remitente</Text>
           </View>
           
           <View style={styles.manualContainer}>
@@ -400,7 +455,7 @@ export default function AdminScreen() {
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>Gmail Destino:</Text>
+            <Text style={styles.inputLabel}>Gmail Remitente:</Text>
             <TextInput
               style={styles.input}
               placeholder="tu-correo@gmail.com"
@@ -427,6 +482,58 @@ export default function AdminScreen() {
             <TouchableOpacity style={[styles.button, { backgroundColor: '#3B82F6', flex: 1 }]} onPress={handleTestEmail}>
               <Text style={styles.buttonText}>Probar Email</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Destination Emails Section */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <MaterialCommunityIcons name="email-multiple" size={24} color="#F43F5E" />
+            <Text style={styles.cardTitle}>Gestión de Destinatarios</Text>
+          </View>
+          <Text style={styles.description}>
+            Añade los correos electrónicos que recibirán los pedidos.
+          </Text>
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={styles.input}
+              placeholder="Nombre (ej: Almacén Principal)"
+              value={newDestName}
+              onChangeText={setNewDestName}
+            />
+          </View>
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={styles.input}
+              placeholder="Correo electrónico"
+              value={newDestEmail}
+              onChangeText={setNewDestEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+          </View>
+          
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <TouchableOpacity style={[styles.button, { backgroundColor: '#F43F5E', flex: 1 }]} onPress={handleAddDestinationEmail}>
+              <Text style={styles.buttonText}>Añadir Destinatario</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={{ marginTop: 20, borderTopWidth: 1, borderTopColor: '#F3F4F6', paddingTop: 15 }}>
+            <Text style={{ fontWeight: 'bold', marginBottom: 10, color: '#4B5563' }}>Destinatarios Existentes:</Text>
+            {destinationEmails.map((dest) => (
+              <View key={dest.id} style={styles.itemRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.itemName}>{dest.name || 'Sin nombre'}</Text>
+                  <Text style={styles.itemCategory}>{dest.email}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 5 }}>
+                  <TouchableOpacity onPress={() => handleDeleteDestinationEmail(dest.id)} style={styles.actionBtn}>
+                    <MaterialCommunityIcons name="trash-can" size={18} color="#EF4444" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
           </View>
         </View>
 

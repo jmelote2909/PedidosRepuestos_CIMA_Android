@@ -32,6 +32,7 @@ const pool = new Pool({
   connectionTimeoutMillis: 20000, // Darle tiempo a esos 9 segundos si ocurren
   keepAlive: true,                
   keepAliveInitialDelayMillis: 10000,
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined
 });
 
 // Helper simplificado para PostgreSQL
@@ -86,16 +87,18 @@ function invalidateCache(...keys) {
   console.log(`[Cache] Invalidated: ${keys.join(', ')}`);
 }
 
-// Función para obtener el transporter con los datos actuales de la DB
 async function sendOrderEmail(targetEmail, order) {
   const smtpPass = await db.get('SELECT value FROM config WHERE key = $1', ['smtp_pass']);
+  const senderEmailRow = await db.get("SELECT value FROM config WHERE key = 'target_email'");
 
-  if (!targetEmail || !smtpPass) return;
+  if (!targetEmail || !smtpPass || !senderEmailRow) return;
+
+  const senderEmail = senderEmailRow.value;
 
   const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-      user: targetEmail,
+      user: senderEmail,
       pass: smtpPass.value
     }
   });
@@ -108,7 +111,7 @@ async function sendOrderEmail(targetEmail, order) {
   itemsHtml += '</ul>';
 
   const mailOptions = {
-    from: `"CIMA - Pedido de Repuestos" <${targetEmail}>`,
+    from: `"CIMA - Pedido de Repuestos" <${senderEmail}>`,
     to: targetEmail,
     subject: `Nuevo Pedido Recibido - ${order.username}`,
     html: `
@@ -126,7 +129,7 @@ async function sendOrderEmail(targetEmail, order) {
 
   try {
     await transporter.sendMail(mailOptions);
-    console.log('Email enviado con éxito');
+    console.log('Email enviado con éxito a', targetEmail);
   } catch (error) {
     console.error('Error enviando email:', error);
   }
@@ -339,15 +342,23 @@ app.get('/api/orders', async (req, res) => {
 app.post('/api/orders', async (req, res) => {
   try {
     console.log('Recibida petición de pedido:', req.body);
-    const { username, items, status, date, description } = req.body;
+    const { username, items, status, date, description, target_email } = req.body;
     const result = await db.run('INSERT INTO orders (username, items, status, date, description) VALUES ($1, $2, $3, $4, $5) RETURNING id', [username, JSON.stringify(items), status, date, description || '']);
     
-    // Obtener el correo destino de la configuración
-    const config = await db.get("SELECT value FROM config WHERE key = 'target_email'");
-    console.log('Enviando email a:', config.value);
-    
-    // Enviar el correo
-    await sendOrderEmail(config.value, { id: result.lastID, username, items: JSON.stringify(items), date, description });
+    let destinationEmail = target_email;
+
+    // Si no se envía target_email (versiones antiguas), intentamos buscar uno por defecto
+    if (!destinationEmail) {
+      const config = await db.get("SELECT value FROM config WHERE key = 'target_email'");
+      destinationEmail = config ? config.value : null;
+    }
+
+    if (destinationEmail) {
+      console.log('Enviando email a:', destinationEmail);
+      await sendOrderEmail(destinationEmail, { id: result.lastID, username, items: JSON.stringify(items), date, description });
+    } else {
+      console.log('No se envió email: No se especificó target_email');
+    }
     
     res.json({ success: true });
   } catch (e) {
@@ -402,31 +413,65 @@ app.post('/api/config', async (req, res, next) => {
 
 app.post('/api/config/test_email', async (req, res) => {
   try {
-    const target = await db.get("SELECT value FROM config WHERE key = 'target_email'");
+    const sender = await db.get("SELECT value FROM config WHERE key = 'target_email'");
     const smtpPass = await db.get("SELECT value FROM config WHERE key = 'smtp_pass'");
+    const { to } = req.body; // Allow specifying a test recipient
     
-    if (!target || !smtpPass) {
-      throw new Error('Configuración incompleta');
+    if (!sender || !smtpPass) {
+      throw new Error('Configuración incompleta del remitente');
     }
+
+    const testTarget = to || sender.value;
 
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
-        user: target.value,
+        user: sender.value,
         pass: smtpPass.value
       }
     });
 
     await transporter.sendMail({
-      from: `"CIMA - Pedido de Repuestos" <${target.value}>`,
-      to: target.value,
+      from: `"CIMA - Pedido de Repuestos" <${sender.value}>`,
+      to: testTarget,
       subject: 'Prueba de Conexión - CIMA - Pedido de Repuestos',
-      text: 'Si recibes esto, la configuración de tu App es correcta.'
+      text: 'Si recibes esto, la configuración de envío de tu App es correcta.'
     });
     res.json({ success: true });
   } catch (error) {
     console.error('Error en test de email:', error);
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// --- Destination Emails ---
+app.get('/api/destination_emails', async (req, res) => {
+  const cached = getCache('destination_emails');
+  if (cached) return res.json(cached);
+  const emails = await db.all('SELECT * FROM destination_emails');
+  setCache('destination_emails', emails);
+  res.json(emails);
+});
+
+app.post('/api/destination_emails', async (req, res) => {
+  const { email, name } = req.body;
+  try {
+    await db.run('INSERT INTO destination_emails (email, name) VALUES ($1, $2)', [email, name || '']);
+    invalidateCache('destination_emails');
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Error creating destination email:', e);
+    res.status(400).json({ success: false, message: 'El correo ya existe o ocurrió un error' });
+  }
+});
+
+app.delete('/api/destination_emails/:id', async (req, res) => {
+  try {
+    await db.run('DELETE FROM destination_emails WHERE id = $1', [req.params.id]);
+    invalidateCache('destination_emails');
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, message: 'Error al borrar' });
   }
 });
 
@@ -450,11 +495,12 @@ app.post('/api/admin/update_credentials', async (req, res) => {
 // --- Rutas de Dashboard (API) ---
 app.get('/api/admin/dashboard', async (req, res) => {
   try {
-    const [users, categories, products, config] = await Promise.all([
+    const [users, categories, products, config, destEmails] = await Promise.all([
       pool.query('SELECT id, username, role FROM users ORDER BY id DESC'),
       pool.query('SELECT * FROM categories ORDER BY name ASC'),
       pool.query('SELECT * FROM products ORDER BY name ASC'),
-      pool.query('SELECT key, value FROM config')
+      pool.query('SELECT key, value FROM config'),
+      pool.query('SELECT * FROM destination_emails ORDER BY id ASC')
     ]);
 
     res.json({
@@ -462,7 +508,8 @@ app.get('/api/admin/dashboard', async (req, res) => {
       users: users.rows,
       categories: categories.rows,
       products: products.rows,
-      config: config.rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {})
+      config: config.rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {}),
+      destination_emails: destEmails.rows
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -471,15 +518,17 @@ app.get('/api/admin/dashboard', async (req, res) => {
 
 app.get('/api/shop/dashboard', async (req, res) => {
   try {
-    const [categories, products] = await Promise.all([
+    const [categories, products, destEmails] = await Promise.all([
       pool.query('SELECT * FROM categories ORDER BY name ASC'),
-      pool.query('SELECT * FROM products ORDER BY name ASC')
+      pool.query('SELECT * FROM products ORDER BY name ASC'),
+      pool.query('SELECT * FROM destination_emails ORDER BY id ASC')
     ]);
 
     res.json({
       success: true,
       categories: categories.rows,
-      products: products.rows
+      products: products.rows,
+      destination_emails: destEmails.rows
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -572,6 +621,12 @@ const PORT = process.env.PORT || 3000;
       CREATE TABLE IF NOT EXISTS config (
         key VARCHAR(255) PRIMARY KEY,
         value TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS destination_emails (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) UNIQUE,
+        name VARCHAR(255)
       );
     `);
 
