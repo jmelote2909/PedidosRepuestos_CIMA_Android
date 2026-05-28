@@ -429,27 +429,32 @@ app.post('/api/config', async (req, res, next) => {
 
 app.post('/api/config/test_email', async (req, res) => {
   try {
-    const { email } = req.body;
+    const { email, password } = req.body;
     if (!email) {
       throw new Error('Debe especificar el correo a probar');
     }
 
-    const mailAccount = await db.get('SELECT * FROM destination_emails WHERE email = $1', [email]);
-    if (!mailAccount || !mailAccount.password) {
-      throw new Error('Cuenta de correo no encontrada o no tiene contraseña configurada');
+    let smtpPass = password;
+
+    if (!smtpPass) {
+      const mailAccount = await db.get('SELECT * FROM destination_emails WHERE email = $1', [email]);
+      if (!mailAccount || !mailAccount.password) {
+        throw new Error('Cuenta de correo no encontrada o no tiene contraseña configurada');
+      }
+      smtpPass = mailAccount.password;
     }
 
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
-        user: mailAccount.email,
-        pass: mailAccount.password
+        user: email,
+        pass: smtpPass
       }
     });
 
     await transporter.sendMail({
-      from: `"CIMA - Prueba" <${mailAccount.email}>`,
-      to: mailAccount.email,
+      from: `"CIMA - Prueba" <${email}>`,
+      to: email,
       subject: 'Prueba de Conexión - CIMA - Pedido de Repuestos',
       text: 'Si recibes esto, la configuración de tu cuenta de correo en la App es correcta.'
     });
@@ -522,6 +527,41 @@ app.post('/api/admin/update_credentials', async (req, res) => {
 });
 
 // --- Rutas de Dashboard (API) ---
+async function getProductsWithLastOrder(productsRows) {
+  try {
+    const ordersRes = await pool.query('SELECT username, date, items FROM orders ORDER BY id DESC');
+    const lastOrderedMap = new Map();
+    
+    ordersRes.rows.forEach(order => {
+      try {
+        const items = JSON.parse(order.items || '[]');
+        items.forEach(item => {
+          const key = item.name;
+          if (key && !lastOrderedMap.has(key)) {
+            lastOrderedMap.set(key, {
+              username: order.username,
+              date: order.date
+            });
+          }
+        });
+      } catch (e) {
+        // Ignorar JSON inválido
+      }
+    });
+
+    return productsRows.map(prod => {
+      const lastOrder = lastOrderedMap.get(prod.name);
+      return {
+        ...prod,
+        last_order: lastOrder || null
+      };
+    });
+  } catch (err) {
+    console.error('Error fetching last order details for products:', err);
+    return productsRows.map(prod => ({ ...prod, last_order: null }));
+  }
+}
+
 app.get('/api/admin/dashboard', async (req, res) => {
   try {
     const [users, categories, products, config, destEmails] = await Promise.all([
@@ -532,11 +572,13 @@ app.get('/api/admin/dashboard', async (req, res) => {
       pool.query('SELECT * FROM destination_emails ORDER BY id ASC')
     ]);
 
+    const productsWithLastOrder = await getProductsWithLastOrder(products.rows);
+
     res.json({
       success: true,
       users: users.rows,
       categories: categories.rows,
-      products: products.rows,
+      products: productsWithLastOrder,
       config: config.rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {}),
       destination_emails: destEmails.rows
     });
@@ -553,10 +595,12 @@ app.get('/api/shop/dashboard', async (req, res) => {
       pool.query('SELECT * FROM destination_emails ORDER BY id ASC')
     ]);
 
+    const productsWithLastOrder = await getProductsWithLastOrder(products.rows);
+
     res.json({
       success: true,
       categories: categories.rows,
-      products: products.rows,
+      products: productsWithLastOrder,
       destination_emails: destEmails.rows
     });
   } catch (err) {
