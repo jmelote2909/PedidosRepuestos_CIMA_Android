@@ -86,8 +86,38 @@ export default function ShopScreen() {
       setDescription('');
       setSelectedDestination(null);
       setCartVisible(false);
+      fetchData(); // Recargar productos para actualizar la última fecha de pedido al instante
     } catch (e) {
       alert('Error al realizar el pedido');
+    }
+  };
+
+  const formatLastOrder = (lastOrder) => {
+    if (!lastOrder || !lastOrder.date) return '';
+    try {
+      const { username, date } = lastOrder;
+      const parts = date.split(', ');
+      const day = parts[0];
+      let time = parts[1] || '';
+      if (time) {
+        const timeParts = time.split(':');
+        if (timeParts.length >= 2) {
+          time = `${timeParts[0]}:${timeParts[1]}`;
+        }
+      } else {
+        const spaceParts = date.split(' ');
+        if (spaceParts.length >= 2) {
+          const possibleDay = spaceParts[0];
+          const possibleTime = spaceParts[1];
+          const timeParts = possibleTime.split(':');
+          if (timeParts.length >= 2) {
+            return `Último pedido: por ${username} a las ${timeParts[0]}:${timeParts[1]} del día ${possibleDay}`;
+          }
+        }
+      }
+      return `Último pedido: por ${username} a las ${time || '00:00'} del día ${day}`;
+    } catch (e) {
+      return `Último pedido: por ${lastOrder.username} el ${lastOrder.date}`;
     }
   };
 
@@ -105,6 +135,15 @@ export default function ShopScreen() {
       <View style={styles.productInfo}>
         <Text style={styles.productName}>{item.name}</Text>
         <Text style={styles.productCategory}>{item.category_name}</Text>
+        {item.last_order ? (
+          <Text style={styles.lastOrderText}>
+            {formatLastOrder(item.last_order)}
+          </Text>
+        ) : (
+          <Text style={[styles.lastOrderText, { color: '#9CA3AF' }]}>
+            Nunca pedido
+          </Text>
+        )}
         <TouchableOpacity style={styles.addButton} onPress={() => addToCart(item)}>
           <LinearGradient
             colors={['#10B981', '#059669']}
@@ -349,7 +388,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 3,
-    minHeight: 240, // Asegurar que siempre quepa el contenido y el botón
+    minHeight: 260, // Aumentado para que quepa la información de última vez pedido
   },
   productImage: {
     width: '100%',
@@ -368,6 +407,14 @@ const styles = StyleSheet.create({
   productCategory: {
     fontSize: 12,
     color: '#6B7280',
+    marginBottom: 6,
+  },
+  lastOrderText: {
+    fontSize: 10,
+    color: '#3B82F6', // Azul profesional CIMA
+    fontStyle: 'italic',
+    marginTop: 2,
+    lineHeight: 14,
     marginBottom: 10,
   },
   addButton: {
