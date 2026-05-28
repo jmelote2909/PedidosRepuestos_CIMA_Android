@@ -430,27 +430,32 @@ app.post('/api/config', async (req, res, next) => {
 
 app.post('/api/config/test_email', async (req, res) => {
   try {
-    const { email } = req.body;
+    const { email, password } = req.body;
     if (!email) {
       throw new Error('Debe especificar el correo a probar');
     }
 
-    const mailAccount = await db.get('SELECT * FROM destination_emails WHERE email = $1', [email]);
-    if (!mailAccount || !mailAccount.password) {
-      throw new Error('Cuenta de correo no encontrada o no tiene contraseña configurada');
+    let smtpPass = password;
+
+    if (!smtpPass) {
+      const mailAccount = await db.get('SELECT * FROM destination_emails WHERE email = $1', [email]);
+      if (!mailAccount || !mailAccount.password) {
+        throw new Error('Cuenta de correo no encontrada o no tiene contraseña configurada');
+      }
+      smtpPass = mailAccount.password;
     }
 
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
-        user: mailAccount.email,
-        pass: mailAccount.password
+        user: email,
+        pass: smtpPass
       }
     });
 
     await transporter.sendMail({
-      from: `"CIMA - Prueba" <${mailAccount.email}>`,
-      to: mailAccount.email,
+      from: `"CIMA - Prueba" <${email}>`,
+      to: email,
       subject: 'Prueba de Conexión - CIMA - Pedido de Repuestos',
       text: 'Si recibes esto, la configuración de tu cuenta de correo en la App es correcta.'
     });

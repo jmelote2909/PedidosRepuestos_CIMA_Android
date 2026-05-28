@@ -98,7 +98,7 @@ export default function AdminScreen() {
           'Content-Type': 'application/json',
           'bypass-tunnel-reminder': 'true'
         },
-        body: JSON.stringify({ email: newDestEmail })
+        body: JSON.stringify({ email: newDestEmail, password: newDestPassword })
       });
       const data = await res.json();
       if (data.success) {
