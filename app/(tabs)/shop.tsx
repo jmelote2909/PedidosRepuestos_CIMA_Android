@@ -124,7 +124,7 @@ export default function ShopScreen() {
   const renderProduct = ({ item }) => (
     <View style={styles.productCard}>
       {item.image ? (
-        <Image source={{ uri: item.image }} style={styles.productImage} />
+        <Image source={{ uri: item.image }} style={styles.productImage} resizeMode="contain" />
       ) : (
         <View style={styles.productImage}>
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#E5E7EB' }}>
@@ -393,7 +393,7 @@ const styles = StyleSheet.create({
   productImage: {
     width: '100%',
     height: 150,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
   },
   productInfo: {
     padding: 12,
