@@ -527,6 +527,41 @@ app.post('/api/admin/update_credentials', async (req, res) => {
   }
 });
 
+async function getProductsWithLastOrder(productsRows) {
+  try {
+    const ordersRes = await pool.query('SELECT username, date, items FROM orders ORDER BY id DESC');
+    const lastOrderedMap = new Map();
+    
+    ordersRes.rows.forEach(order => {
+      try {
+        const items = JSON.parse(order.items || '[]');
+        items.forEach(item => {
+          const key = item.name;
+          if (key && !lastOrderedMap.has(key)) {
+            lastOrderedMap.set(key, {
+              username: order.username,
+              date: order.date
+            });
+          }
+        });
+      } catch (e) {
+        // Ignorar JSON inválido
+      }
+    });
+
+    return productsRows.map(prod => {
+      const lastOrder = lastOrderedMap.get(prod.name);
+      return {
+        ...prod,
+        last_order: lastOrder || null
+      };
+    });
+  } catch (err) {
+    console.error('Error fetching last order details for products:', err);
+    return productsRows.map(prod => ({ ...prod, last_order: null }));
+  }
+}
+
 // --- Rutas de Dashboard (API) ---
 app.get('/api/admin/dashboard', async (req, res) => {
   try {
@@ -538,11 +573,13 @@ app.get('/api/admin/dashboard', async (req, res) => {
       pool.query('SELECT * FROM destination_emails ORDER BY id ASC')
     ]);
 
+    const productsWithLastOrder = await getProductsWithLastOrder(products.rows);
+
     res.json({
       success: true,
       users: users.rows,
       categories: categories.rows,
-      products: products.rows,
+      products: productsWithLastOrder,
       config: config.rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {}),
       destination_emails: destEmails.rows
     });
@@ -559,10 +596,12 @@ app.get('/api/shop/dashboard', async (req, res) => {
       pool.query('SELECT * FROM destination_emails ORDER BY id ASC')
     ]);
 
+    const productsWithLastOrder = await getProductsWithLastOrder(products.rows);
+
     res.json({
       success: true,
       categories: categories.rows,
-      products: products.rows,
+      products: productsWithLastOrder,
       destination_emails: destEmails.rows
     });
   } catch (err) {
