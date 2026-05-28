@@ -1,4 +1,3 @@
-//akujtfvynymqsvmx
 require('dotenv').config();
 const express = require('express');
 const compression = require('compression');
@@ -30,7 +29,7 @@ const pool = new Pool({
   max: 25,                        // Subimos a 25 para tener margen de sobra
   idleTimeoutMillis: 0,           // Nunca cerrar
   connectionTimeoutMillis: 20000, // Darle tiempo a esos 9 segundos si ocurren
-  keepAlive: true,                
+  keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined
 });
@@ -56,9 +55,9 @@ const db = {
     const res = await pool.query(query, params);
     const duration = Date.now() - start;
     if (duration > 100) console.log(`[DB Slow Run] ${duration}ms - Query: ${query.substring(0, 50)}...`);
-    return { 
+    return {
       lastID: res.rows[0]?.id,
-      rowCount: res.rowCount 
+      rowCount: res.rowCount
     };
   }
 };
@@ -158,7 +157,7 @@ async function sendOrderEmail(targetEmail, order) {
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   const user = await db.get('SELECT * FROM users WHERE username = $1', [username]);
-  
+
   if (user && await bcrypt.compare(password, user.password)) {
     res.json({ success: true, user });
   } else {
@@ -270,8 +269,8 @@ app.delete('/api/users/:id', async (req, res) => {
     }
 
     // Borrado forzado: eliminamos rastro en otras tablas si existen
-    await db.run('DELETE FROM orders WHERE user_id = $1', [id]).catch(() => {});
-    
+    await db.run('DELETE FROM orders WHERE user_id = $1', [id]).catch(() => { });
+
     await db.run('DELETE FROM users WHERE id = $1', [id]);
     invalidateCache('users');
     res.json({ success: true });
@@ -290,7 +289,7 @@ app.delete('/api/categories/:id', async (req, res) => {
       // los movemos a una categoría por defecto o simplemente los borramos
       await db.run('DELETE FROM products WHERE category_name = $1', [category.name]);
     }
-    
+
     await db.run('DELETE FROM categories WHERE id = $1', [id]);
     invalidateCache('categories', 'products');
     res.json({ success: true });
@@ -361,7 +360,7 @@ app.post('/api/orders', async (req, res) => {
     console.log('Recibida petición de pedido:', req.body);
     const { username, items, status, date, description, target_email } = req.body;
     const result = await db.run('INSERT INTO orders (username, items, status, date, description) VALUES ($1, $2, $3, $4, $5) RETURNING id', [username, JSON.stringify(items), status, date, description || '']);
-    
+
     let destinationEmail = target_email;
 
     // Si no se envía target_email (versiones antiguas), intentamos buscar uno por defecto
@@ -376,7 +375,7 @@ app.post('/api/orders', async (req, res) => {
     } else {
       console.log('No se envió email: No se especificó target_email');
     }
-    
+
     res.json({ success: true });
   } catch (e) {
     console.error('Error creating order:', e);
@@ -430,32 +429,27 @@ app.post('/api/config', async (req, res, next) => {
 
 app.post('/api/config/test_email', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email } = req.body;
     if (!email) {
       throw new Error('Debe especificar el correo a probar');
     }
 
-    let smtpPass = password;
-
-    if (!smtpPass) {
-      const mailAccount = await db.get('SELECT * FROM destination_emails WHERE email = $1', [email]);
-      if (!mailAccount || !mailAccount.password) {
-        throw new Error('Cuenta de correo no encontrada o no tiene contraseña configurada');
-      }
-      smtpPass = mailAccount.password;
+    const mailAccount = await db.get('SELECT * FROM destination_emails WHERE email = $1', [email]);
+    if (!mailAccount || !mailAccount.password) {
+      throw new Error('Cuenta de correo no encontrada o no tiene contraseña configurada');
     }
 
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
-        user: email,
-        pass: smtpPass
+        user: mailAccount.email,
+        pass: mailAccount.password
       }
     });
 
     await transporter.sendMail({
-      from: `"CIMA - Prueba" <${email}>`,
-      to: email,
+      from: `"CIMA - Prueba" <${mailAccount.email}>`,
+      to: mailAccount.email,
       subject: 'Prueba de Conexión - CIMA - Pedido de Repuestos',
       text: 'Si recibes esto, la configuración de tu cuenta de correo en la App es correcta.'
     });
@@ -527,41 +521,6 @@ app.post('/api/admin/update_credentials', async (req, res) => {
   }
 });
 
-async function getProductsWithLastOrder(productsRows) {
-  try {
-    const ordersRes = await pool.query('SELECT username, date, items FROM orders ORDER BY id DESC');
-    const lastOrderedMap = new Map();
-    
-    ordersRes.rows.forEach(order => {
-      try {
-        const items = JSON.parse(order.items || '[]');
-        items.forEach(item => {
-          const key = item.name;
-          if (key && !lastOrderedMap.has(key)) {
-            lastOrderedMap.set(key, {
-              username: order.username,
-              date: order.date
-            });
-          }
-        });
-      } catch (e) {
-        // Ignorar JSON inválido
-      }
-    });
-
-    return productsRows.map(prod => {
-      const lastOrder = lastOrderedMap.get(prod.name);
-      return {
-        ...prod,
-        last_order: lastOrder || null
-      };
-    });
-  } catch (err) {
-    console.error('Error fetching last order details for products:', err);
-    return productsRows.map(prod => ({ ...prod, last_order: null }));
-  }
-}
-
 // --- Rutas de Dashboard (API) ---
 app.get('/api/admin/dashboard', async (req, res) => {
   try {
@@ -573,13 +532,11 @@ app.get('/api/admin/dashboard', async (req, res) => {
       pool.query('SELECT * FROM destination_emails ORDER BY id ASC')
     ]);
 
-    const productsWithLastOrder = await getProductsWithLastOrder(products.rows);
-
     res.json({
       success: true,
       users: users.rows,
       categories: categories.rows,
-      products: productsWithLastOrder,
+      products: products.rows,
       config: config.rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {}),
       destination_emails: destEmails.rows
     });
@@ -596,12 +553,10 @@ app.get('/api/shop/dashboard', async (req, res) => {
       pool.query('SELECT * FROM destination_emails ORDER BY id ASC')
     ]);
 
-    const productsWithLastOrder = await getProductsWithLastOrder(products.rows);
-
     res.json({
       success: true,
       categories: categories.rows,
-      products: productsWithLastOrder,
+      products: products.rows,
       destination_emails: destEmails.rows
     });
   } catch (err) {
@@ -612,8 +567,8 @@ app.get('/api/shop/dashboard', async (req, res) => {
 // Middleware de manejo de errores global
 app.use((err, req, res, next) => {
   console.error('Unhandled Error:', err);
-  res.status(500).json({ 
-    success: false, 
+  res.status(500).json({
+    success: false,
     message: 'Error interno del servidor',
     error: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
@@ -622,7 +577,7 @@ app.use((err, req, res, next) => {
 // Catch-all: DEBE IR AL FINAL DE TODO
 app.use((req, res) => {
   const routePath = req.path === '/' ? '/index' : req.path;
-  const exactHtml  = path.join(distPath, routePath + '.html');
+  const exactHtml = path.join(distPath, routePath + '.html');
   const nestedHtml = path.join(distPath, routePath, 'index.html');
 
   if (fs.existsSync(exactHtml)) {
@@ -779,7 +734,7 @@ const PORT = process.env.PORT || 3000;
     // Esto evita que el servidor intente "presentarse" (DNS) en cada clic.
     server.keepAliveTimeout = 3600000; // 1 hora
     server.headersTimeout = 3601000;
-    
+
   } catch (error) {
     console.error('Error during initialization:', error);
   }
