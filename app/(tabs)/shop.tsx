@@ -8,6 +8,7 @@ import { API_URL, getHeaders } from '../../constants/API';
 
 export default function ShopScreen() {
   const { width } = useWindowDimensions();
+  const numColumns = width > 1024 ? 4 : (width > 600 ? 3 : 2);
   const router = useRouter();
   const [selectedCategory, setSelectedCategory] = useState('Todos');
   const [cart, setCart] = useState([]);
@@ -194,10 +195,11 @@ export default function ShopScreen() {
       </View>
 
       <FlatList
+        key={numColumns}
         data={filteredProducts}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => item.id.toString()}
         renderItem={renderProduct}
-        numColumns={2}
+        numColumns={numColumns}
         contentContainerStyle={styles.productList}
         columnWrapperStyle={styles.row}
       />
