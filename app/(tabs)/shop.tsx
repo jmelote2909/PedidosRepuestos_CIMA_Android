@@ -170,8 +170,8 @@ export default function ShopScreen() {
         borderBottomColor: '#E5E7EB'
       }}>
         <View>
-          <Text style={{ fontSize: 24, fontWeight: '800', color: '#1F2937' }}>CIMA</Text>
-          {currentUser ? <Text style={{ color: '#10B981', fontSize: 14 }}>Hola, {currentUser}</Text> : null}
+          <Text style={{ fontSize: 32, fontWeight: '900', color: '#1F2937' }}>CIMA</Text>
+          {currentUser ? <Text style={{ color: '#10B981', fontSize: 18, fontWeight: '600', marginTop: 2 }}>Hola, {currentUser}</Text> : null}
         </View>
       </View>
 
@@ -367,6 +367,7 @@ const styles = StyleSheet.create({
   categoryText: {
     color: '#4B5563',
     fontWeight: '600',
+    fontSize: 16, // Aumentado de 14 a 16
   },
   categoryTextActive: {
     color: '#FFFFFF',
@@ -390,7 +391,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 3,
-    minHeight: 260, // Aumentado para que quepa la información de última vez pedido
+    minHeight: 290, // Aumentado de 260 a 290 para dar espacio cómodo al texto más grande
   },
   productImage: {
     width: '100%',
@@ -401,22 +402,22 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   productName: {
-    fontSize: 16,
+    fontSize: 19, // Aumentado de 16 a 19
     fontWeight: '700',
     color: '#1F2937',
     marginBottom: 4,
   },
   productCategory: {
-    fontSize: 12,
+    fontSize: 14, // Aumentado de 12 a 14
     color: '#6B7280',
     marginBottom: 6,
   },
   lastOrderText: {
-    fontSize: 10,
+    fontSize: 12, // Aumentado de 10 a 12
     color: '#3B82F6', // Azul profesional CIMA
     fontStyle: 'italic',
     marginTop: 2,
-    lineHeight: 14,
+    lineHeight: 16, // Aumentado de 14 a 16
     marginBottom: 10,
   },
   addButton: {
